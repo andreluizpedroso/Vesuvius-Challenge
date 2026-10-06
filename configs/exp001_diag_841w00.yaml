@@ -1,0 +1,25 @@
+# exp001: CPU-only diagnostics on ink-labels 841/w00 (no model, no GPU).
+# Decides which pyramid level feeds ink_9um (~9.6 um expected) and how GT is defined.
+# Official GT convention (villa train.py @ 0e14cf48): target = amax(inklabels over z) > 0,
+# supervision = amax(supervision over z).
+
+experiment: exp001_diag_841w00
+runtime: kaggle-cpu          # Accelerator: None. Internet on, notebook PRIVATE.
+script: scripts/diag_exp001.py
+
+data:
+  base_url: https://huggingface.co/buckets/scrollprize/datasets/resolve/ink/841/w00
+  volume: w00.zarr
+  labels:
+    ink: w00_inklabels_v2.zarr
+    supervision: w00_supervision_mask_v2.zarr
+    validation: w00_validation_mask_v2.zarr
+  # Same area as the exp000 crop, in level-1 pixel coordinates (y, x). Chunk-aligned.
+  window_l1_yx: [5504, 5248]
+
+# Hypotheses under test (written before running):
+#  H1: w00.zarr level 0 is ~2.4 um (zattrs source_zarr = 2.403um volume), so exp000's level 1
+#      (~4.8 um) was 2x finer than ink_9um's expected ~9.6 um; level 2 (17 slices) would match.
+#      Alternative H1b: meta.json "4.681um" is right => level 1 ~9.4 um was correct.
+#  H2: label masks live on a single z slice (create_label_zarrs embeds the 2D label at z=32).
+#  H3: pyramid levels are 2x2x2 mean pooled (z halves each level: 65, 33, 17, 9).
