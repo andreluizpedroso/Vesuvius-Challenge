@@ -1,0 +1,40 @@
+# exp009: reproduction of the official ink_9um training recipe at reduced length (20,000 of 78,125 iterations).
+# Same recipe, same data sources, same LR schedule as the official run; ONLY these deviations (all documented):
+#   1. num_iterations = 20000 but max_steps = 78125  => the LR schedule is the official 78,125-step curve, we simply
+#      stop early, so ckpt_010000 / ckpt_020000 are comparable to the official step-010000 / step-020000 checkpoints.
+#   2. the 5 native 9.362 um PHerc 0139 segments are NOT used (24 aligned representations instead of 29).
+#   3. dataloader_workers 4 (Kaggle has 4 CPUs; official 12): throughput ~50 examples/s (exp006/007) => ~7 h.
+#   4. seed 42 as in the official run; the checkpoint-to-checkpoint seed gap measured in exp005 (up to 0.07 AUPRC on
+#      held-out regions) is the tolerance for "reproduced".
+# Everything else (model, loss, SGD lr 0.01, batch 64, fp16, augmentation, scroll prior 29/22/11/2) is untouched.
+
+experiment: exp009_repro_train
+runtime: kaggle-t4x2          # 1 GPU used (the loader is the bottleneck, exp007). Internet on, notebook PRIVATE.
+
+upstream:
+  villa_commit: 0e14cf48c8cee74b11e5e40a9d1d520b74e35423
+  python: "3.14"
+  uv_sync_args: ["--frozen", "--extra", "models", "--no-install-package", "volume-cartographer"]
+  recipe: vesuvius/src/vesuvius/ink_detection/configs/aligned21_hybrid_3d2d.json
+
+corpus_kernels:               # private outputs of the exp008 notebooks, attached as inputs
+  A: andreluizpedroso/exp008-corpus-a-api       # PHerc 0139, 0814, 1667
+  B: andreluizpedroso/exp008-corpus-b-api       # Paris 4
+segments_dir: labels/aligned-scrollprizeorg-21slices
+scroll_group: {"0139": A, "0814": A, "1667": A, "Paris4": B}
+
+overrides:
+  num_iterations: 20000
+  max_steps: 78125
+  dataloader_workers: 4
+  save_every: 5000            # official value; gives ckpt_005000 ... ckpt_020000
+  val_every: 5000
+  val_steps: 32
+  val_preview_batches: 0      # no preview images
+
+smoke:                        # short run on the real corpus before the long one (cheap insurance)
+  num_iterations: 120
+  save_every: 120
+  val_every: 100
+
+timeout_seconds: 34200        # 9.5 h cap for the long training run (expected ~7 h for 20k steps)
