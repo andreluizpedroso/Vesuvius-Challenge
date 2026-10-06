@@ -12,8 +12,11 @@ Run in the villa uv env:  uv run --no-sync python exp003_prepare.py --config ...
 from __future__ import annotations
 
 import argparse
+import collections
 import json
+import re
 import sys
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -27,19 +30,40 @@ from exp002_prepare import build_input, sha256  # noqa: E402
 CH = 128
 
 
-def read_plane(arr: "dz.ZArray", channel: int, workers: int = 32) -> np.ndarray:
-    """Whole (Y, X) plane of one channel; only the tiny chunks of a label zarr are fetched."""
+def list_nonempty(tree_url: str, name: str) -> set[tuple[int, int]]:
+    """(iy, ix) of chunks whose stored size exceeds the all-zero chunk size (the modal size).
+
+    Chunk keys are '<iz>.<iy>.<ix>' under '<name>/0/'. An all-zero chunk compresses to a tiny
+    constant size (78 bytes here), so everything larger carries data; the rest decode to zeros.
+    """
+    url, entries = f"{tree_url}/{name}/0?recursive=true", []
+    while url:
+        with urllib.request.urlopen(url, timeout=60) as r:
+            entries += json.load(r)
+            link = r.headers.get("Link", "")
+        m = re.search(r'<([^>]+)>;\s*rel="next"', link)
+        url = m.group(1) if m else None
+    chunks = {}
+    for e in entries:
+        key = e["path"].rsplit("/", 1)[-1]
+        if e["type"] == "file" and re.fullmatch(r"\d+\.\d+\.\d+", key):
+            _, iy, ix = (int(t) for t in key.split("."))
+            chunks[(iy, ix)] = e["size"]
+    empty = collections.Counter(chunks.values()).most_common(1)[0][0]
+    return {k for k, v in chunks.items() if v > empty}
+
+
+def read_plane(arr: "dz.ZArray", channel: int, nonempty: set[tuple[int, int]], workers: int = 8) -> np.ndarray:
+    """Whole (Y, X) plane of one channel, fetching only the chunks listed as non-empty."""
     H, W = arr.shape[1:]
-    ny, nx = -(-H // CH), -(-W // CH)
-    jobs = [(iy, ix) for iy in range(ny) for ix in range(nx)]
-    out = np.zeros((ny * CH, nx * CH), arr.dtype)
+    out = np.zeros((-(-H // CH) * CH, -(-W // CH) * CH), arr.dtype)
 
     def one(j):
         iy, ix = j
         out[iy * CH:(iy + 1) * CH, ix * CH:(ix + 1) * CH] = arr._chunk(0, iy, ix)[channel]
 
     with ThreadPoolExecutor(workers) as pool:
-        list(pool.map(one, jobs))
+        list(pool.map(one, sorted(nonempty)))
     return out[:H, :W]
 
 
@@ -88,8 +112,11 @@ def main() -> int:
     print("shapes: ink", ink_arr.shape, "sup", sup_arr.shape, "volume", vol.shape, flush=True)
     assert ink_arr.shape[1:] == sup_arr.shape[1:] == vol.shape[1:], "label/volume grids differ"
 
-    ink = read_plane(ink_arr, lab["channel"])
-    sup = read_plane(sup_arr, lab["channel"])
+    ne_ink = list_nonempty(lab["tree_url"], lab["ink"])
+    ne_sup = list_nonempty(lab["tree_url"], lab["supervision"])
+    print("non-empty label chunks: ink", len(ne_ink), "sup", len(ne_sup), flush=True)
+    ink = read_plane(ink_arr, lab["channel"], ne_ink)
+    sup = read_plane(sup_arr, lab["channel"], ne_sup)
     print("label planes read; ink px", int((ink > 0).sum()), "sup px", int((sup > 0).sum()), flush=True)
     w = select_window(ink, sup, d["window"]["size"], d["window"]["stride"], d["window"]["min_coverage"])
     print("window:", w, flush=True)
@@ -125,7 +152,7 @@ def main() -> int:
     rec = {"experiment": cfg["experiment"], "window": w, "input_shape": list(volume.shape),
            "input_sha256": sha256(volume), "z_start_plane": z0,
            "input_stats": {"mean": float(volume.mean()), "std": float(volume.std())},
-           "label_nonzero_channels": nz, "annotation_channel": lab["channel"],
+           "label_nonzero_channels": nz, "nonempty_label_chunks": {"ink": len(ne_ink), "sup": len(ne_sup)}, "annotation_channel": lab["channel"],
            "labels": {"ink": {"positive_fraction": float(gt_ink.mean()), "sha256": sha256(gt_ink)},
                       "supervision": {"positive_fraction": float(gt_sup.mean()), "sha256": sha256(gt_sup)}},
            "fetch_stats": dict(dz._fetch_stats)}

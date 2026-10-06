@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -35,7 +36,8 @@ _fetch_stats = {"requests": 0, "bytes": 0, "missing": 0}
 
 
 def fetch(url: str, allow_missing: bool = False) -> bytes | None:
-    for attempt in range(4):
+    """GET with retries; 429/5xx are retried with backoff (honoring Retry-After)."""
+    for attempt in range(7):
         try:
             with urllib.request.urlopen(url, timeout=60) as r:
                 data = r.read()
@@ -46,11 +48,15 @@ def fetch(url: str, allow_missing: bool = False) -> bytes | None:
             if e.code == 404 and allow_missing:
                 _fetch_stats["missing"] += 1
                 return None
-            if attempt == 3:
+            if attempt == 6 or (e.code != 429 and e.code < 500):
                 raise
+            retry_after = e.headers.get("Retry-After") if e.headers else None
+            time.sleep(float(retry_after) if retry_after and retry_after.isdigit() else min(2 ** attempt, 30))
+            _fetch_stats["retries"] = _fetch_stats.get("retries", 0) + 1
         except Exception:
-            if attempt == 3:
+            if attempt == 6:
                 raise
+            time.sleep(min(2 ** attempt, 30))
     return None
 
 

@@ -33,6 +33,8 @@ data:
     ink: phercparis4-w00_inklabels.zarr
     supervision: phercparis4-w00_supervision_mask.zarr
     channel: 10
+    # Listing API used to read ONLY non-empty chunks (HF throttles thousands of tiny requests: HTTP 429).
+    tree_url: https://huggingface.co/api/buckets/scrollprize/datasets/tree/ink_9um/labels/aligned-scrollprizeorg-21slices/phercparis4-w00
   # Input = official recipe (prepare_9um_isotropic_input): 84 centered planes, mean of 4 -> 21 slices.
   input: {n_planes: 84, z_pool: 4, xy_pool: 1}
   # Window rule (same as exp002, adapted to the chunk grid): coverage of supervision >= min_coverage,
