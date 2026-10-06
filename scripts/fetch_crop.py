@@ -28,14 +28,28 @@ def open_level(base_url: str, name: str, level: str):
     return root if hasattr(root, "shape") else root[level]
 
 
-def as_2d(arr: np.ndarray) -> np.ndarray:
-    """Label zarrs may be stored as (1, Y, X); squeeze to (Y, X)."""
+Z_REPORT: dict[str, dict] = {}
+
+
+def as_2d(arr: np.ndarray, name: str = "") -> np.ndarray:
+    """Collapse a (Z, Y, X) label to (Y, X) with max over Z (any-positive).
+
+    Some ink-labels masks are stored replicated over the surface-volume depth
+    (e.g. 841/w00: (65, Y, X)). Whether the slices are identical is recorded in
+    Z_REPORT so a depth-varying label is never silently flattened.
+    """
     arr = np.asarray(arr)
-    if arr.ndim == 3:
-        if arr.shape[0] != 1:
-            raise ValueError(f"Expected a single-slice label, got {arr.shape}")
-        arr = arr[0]
-    return arr
+    if arr.ndim == 2:
+        return arr
+    if arr.ndim != 3:
+        raise ValueError(f"Expected a 2D or 3D label, got {arr.shape}")
+    identical = bool(np.all(arr == arr[:1]))
+    Z_REPORT.setdefault(name, {})[str(arr.shape)] = {
+        "n_slices": int(arr.shape[0]),
+        "slices_identical": identical,
+        "collapse": "max over z",
+    }
+    return arr.max(axis=0)
 
 
 def window_sums(mask: np.ndarray, win: int, stride: int) -> tuple[np.ndarray, list[int], list[int]]:
@@ -58,9 +72,9 @@ def select_window(data_cfg: dict) -> dict:
     sel_level, lvl = crop["select_level"], data_cfg["label_level"]
     factor = 2 ** (int(sel_level) - int(lvl))  # coarse px -> label_level px
 
-    val = as_2d(open_level(base, labels["validation"], sel_level)[...]) > 0
-    sup = as_2d(open_level(base, labels["supervision"], sel_level)[...]) > 0
-    ink = as_2d(open_level(base, labels["ink"], sel_level)[...]) > 0
+    val = as_2d(open_level(base, labels["validation"], sel_level)[...], "validation") > 0
+    sup = as_2d(open_level(base, labels["supervision"], sel_level)[...], "supervision") > 0
+    ink = as_2d(open_level(base, labels["ink"], sel_level)[...], "ink") > 0
     valid = val & sup
 
     win = crop["size_yx"][0] // factor
@@ -120,9 +134,9 @@ def main() -> int:
 
     cfg = yaml.safe_load(args.config.read_text())
     data = cfg["data"]
-    if args.out.exists():
-        raise FileExistsError(f"Refusing to overwrite {args.out}")
-    args.out.mkdir(parents=True)
+    if args.out.exists() and any(args.out.iterdir()):
+        raise FileExistsError(f"Refusing to overwrite non-empty {args.out}")
+    args.out.mkdir(parents=True, exist_ok=True)
 
     sel = select_window(data) if data["crop"]["bbox_yx"] is None else {"bbox_yx": data["crop"]["bbox_yx"]}
     y0, x0, y1, x1 = sel["bbox_yx"]
@@ -143,7 +157,7 @@ def main() -> int:
             raise ValueError(f"{name} level {data['label_level']} shape {lab_arr.shape} "
                              f"!= volume {vol_arr.shape}")
         sl = (slice(None), slice(y0, y1), slice(x0, x1)) if lab_arr.ndim == 3 else (slice(y0, y1), slice(x0, x1))
-        lab = (as_2d(lab_arr[sl]) > 0).astype(np.uint8)
+        lab = (as_2d(lab_arr[sl], key) > 0).astype(np.uint8)
         np.save(args.out / f"{key}.npy", lab)
         report["labels"][key] = {"source": name, "positive_fraction": float(lab.mean()), "sha256": sha256(lab)}
 
@@ -151,6 +165,7 @@ def main() -> int:
     report["exact_coverage_valid"] = float(valid.mean())
     report["level_hypothesis"] = check_level_hypothesis(data["base_url"], data["volume"],
                                                         data["volume_level"], sel["bbox_yx"])
+    report["label_z_collapse"] = Z_REPORT
     report["env"] = {"python": platform.python_version(), "numpy": np.__version__, "zarr": zarr.__version__}
     (args.out / "crop.json").write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2))
