@@ -1,0 +1,41 @@
+# exp007: Phase 1, step 1b - where does the training data loader spend its time, and can the Kaggle
+# 4-CPU limit (~45 examples/s in exp006, independent of batch size and GPU count) be lifted?
+# Diagnostic only; no model quality is evaluated. Same data and recipe as exp006 (the data are rebuilt
+# with the exp006 scripts/config); every variant below changes ONE thing and is labelled as such.
+#   A. loader-only profile: cProfile of dataset[i] with/without augmentation (what costs CPU)
+#   B. loader-only throughput vs number of workers (0,2,4,6,8), augmentation on, plus an aug-off bound
+#   C. end-to-end trainer benchmarks (150 steps, 30 warm-up excluded) for the variants in `runs`
+#   D. real CPU utilisation (from /proc/stat) during every end-to-end run
+
+experiment: exp007_loader_diag
+runtime: kaggle-t4x2          # Internet on, notebook PRIVATE (pushed with the Kaggle API)
+base_config: configs/exp006_train_benchmark.yaml    # upstream pins, data sources, recipe overrides
+
+loader_profile:
+  profile_samples: 48           # dataset[i] calls under cProfile (single process)
+  worker_sweep: [0, 2, 4, 6, 8]
+  sweep_batch_size: 32
+  sweep_warmup_batches: 4
+  sweep_timed_batches: 16       # (workers=0 uses 6 timed batches)
+  seed: 0
+
+variants:                        # ONE change each, relative to the exp006 recipe on 1 GPU
+  compressed: {description: "surface volume as written by exp006 (zarr v2 default compression)"}
+  uncompressed: {description: "same surface volume chunks stored without compression (less CPU to decode)"}
+
+benchmark_runs:
+  num_iterations: 150
+  warmup_steps: 30
+  runs:
+    - {id: base_w4,      volume: compressed,   batch_size: 32, gpus: 1, workers: 4}    # = exp006 b32_1gpu (reference)
+    - {id: w2,           volume: compressed,   batch_size: 32, gpus: 1, workers: 2}
+    - {id: w6,           volume: compressed,   batch_size: 32, gpus: 1, workers: 6}
+    - {id: w8,           volume: compressed,   batch_size: 32, gpus: 1, workers: 8}
+    - {id: unc_w4,       volume: uncompressed, batch_size: 32, gpus: 1, workers: 4}
+    # threads1: OMP/MKL/OPENBLAS_NUM_THREADS=1 (tests intra-op thread oversubscription: workers x threads > 4 CPUs)
+    - {id: thr1_w4,      volume: compressed,   batch_size: 32, gpus: 1, workers: 4, env: threads1}
+    - {id: thr1_w8,      volume: compressed,   batch_size: 32, gpus: 1, workers: 8, env: threads1}
+    - {id: gpu2_w2,      volume: compressed,   batch_size: 32, gpus: 2, workers: 2}    # 2 GPUs, 2 workers each (4 total = CPUs)
+    - {id: gpu2_thr1_w2, volume: compressed,   batch_size: 32, gpus: 2, workers: 2, env: threads1}
+cpu_monitor_interval_s: 2
+timeout_seconds: 1500            # per run
