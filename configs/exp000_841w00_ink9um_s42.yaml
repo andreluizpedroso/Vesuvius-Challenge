@@ -1,0 +1,50 @@
+# exp000: first inference of ink_9um on a small crop of PHerc 0841 / w00.
+# Goal: pipeline smoke test + first held-out-scroll observation (841 is not in
+# ink_9um's training set, see configs/checkpoints.yaml). Not a benchmark yet.
+
+experiment: exp000_841w00_ink9um_s42
+runtime: kaggle-t4          # 1x T4 16 GB, Internet on, notebook kept PRIVATE
+
+upstream:
+  villa_commit: 0e14cf48c8cee74b11e5e40a9d1d520b74e35423
+  python: "3.14"
+  uv_sync_args: ["--frozen", "--extra", "models", "--no-install-package", "volume-cartographer"]
+
+checkpoint:
+  registry_key: ink_9um
+  hf_repo: scrollprize/ink_9um
+  hf_revision: 7109667e2607db1b90c37c8b09cb876ea7fe7bb1
+  file: hybrid_3d2d-seed42/step-075000.pth   # 138 MB
+
+data:
+  scroll: PHerc0841
+  segment: w00
+  base_url: https://huggingface.co/buckets/scrollprize/datasets/resolve/ink/841/w00
+  volume: w00.zarr
+  # Level 0 is 4.681 um (meta.json: 4.681um_113keV_1.2m_binmean_2_PHerc_0841), 65 slices.
+  # Level 1 has shape (33, 7936, 9472): ~2x in z, y, x => ~9.36 um, close to ink_9um's input.
+  # Hypothesis checked at fetch time (level-1 vs 2x2x2 mean of level 0).
+  volume_level: "1"
+  labels:
+    ink: w00_inklabels_v2.zarr
+    supervision: w00_supervision_mask_v2.zarr
+    validation: w00_validation_mask_v2.zarr
+  label_level: "1"          # same grid as volume_level
+  crop:
+    size_yx: [1024, 1024]   # at volume_level => 2048x2048 at level 0; ~35 MB of chunks
+    # Deterministic selection (scripts/fetch_crop.py), done on the coarse level below:
+    #  1) coverage = fraction of window inside (validation AND supervision)
+    #  2) keep windows with coverage >= min_coverage; pick max ink fraction;
+    #     ties -> smallest (y, x). Fallback: max coverage.
+    # Bias note: picking an ink-dense window makes metrics optimistic vs. the whole
+    # segment. Fine for a smoke test, not for reporting.
+    select_level: "4"
+    select_stride: 16       # in select_level pixels
+    min_coverage: 0.9
+    bbox_yx: null           # filled by fetch_crop.py output (crop.json); copy here after run
+
+inference:
+  module: vesuvius.ink_detection.inference.infer
+  # fp16 forced: T4 (sm_75) has no native bf16, and "auto" may follow the checkpoint's dtype.
+  args: ["--no-compile", "--batch-size", "8", "--overlap", "0.5", "--blend-mode", "hann",
+         "--direction", "both", "--num-workers", "2", "--amp-dtype", "fp16"]
