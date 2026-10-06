@@ -1,0 +1,70 @@
+# exp005: how much do the exp002-004 numbers depend on WHICH checkpoint? Same data, same windows,
+# same metrics; only the checkpoint changes. Data are prepared once and reused for all checkpoints.
+#   - seed x step grid fixed in advance: seeds {42,43} x steps {20000, 50000, 75000}.
+#   - s42_75000 is the checkpoint of exp002-004 => reproduction check (tolerance below).
+#   - no checkpoint is selected or dropped after looking at results.
+# Everything under "preregistered" was fixed BEFORE seeing any prediction.
+
+experiment: exp005_checkpoints_ink9um
+runtime: kaggle-t4x2          # 1 GPU used. Internet on, notebook PRIVATE.
+
+upstream:
+  villa_commit: 0e14cf48c8cee74b11e5e40a9d1d520b74e35423
+  python: "3.14"
+  uv_sync_args: ["--frozen", "--extra", "models", "--no-install-package", "volume-cartographer"]
+
+checkpoint_repo:
+  hf_repo: scrollprize/ink_9um
+  hf_revision: 7109667e2607db1b90c37c8b09cb876ea7fe7bb1
+  registry_key: ink_9um
+  checkpoints:                                  # 138 MB each
+    - {id: s42_20000, file: hybrid_3d2d-seed42/step-020000.pth}
+    - {id: s42_50000, file: hybrid_3d2d-seed42/step-050000.pth}
+    - {id: s42_75000, file: hybrid_3d2d-seed42/step-075000.pth}   # reproduction of exp002-004
+    - {id: s43_20000, file: hybrid_3d2d-seed43/step-020000.pth}
+    - {id: s43_50000, file: hybrid_3d2d-seed43/step-050000.pth}
+    - {id: s43_75000, file: hybrid_3d2d-seed43/step-075000.pth}
+
+# Data are built with the ORIGINAL experiment configs/scripts (windows are deterministic from the rule).
+conditions:
+  paris4:      # exp003: in-train control, window by the exp003 rule
+    kind: single
+    prepare: {script: scripts/exp003_prepare.py, config: configs/exp003_paris4w00_ink9um_s42.yaml}
+    scroll: PHercParis4
+    segment: w00
+    directions: [forward]
+  valregions:  # exp004: validation regions of 3 training segments, pooled + per segment
+    kind: multi
+    prepare: {script: scripts/exp004_prepare.py, config: configs/exp004_valregions_ink9um_s42.yaml}
+    segments_from: configs/exp004_valregions_ink9um_s42.yaml
+    region: held_out_validation
+    directions: [forward]
+  e841:        # exp002: unseen scroll. Orientation is a post-hoc finding => both directions reported.
+    kind: single
+    prepare: {script: scripts/exp002_prepare.py, config: configs/exp002_841w00_ink9um_s42.yaml}
+    scroll: PHerc0841
+    segment: w00
+    directions: [forward, reverse]
+
+inference:
+  module: vesuvius.ink_detection.inference.infer
+  # Default depth window (= offset 0, layers 2..18 of 21). Direction is added per condition.
+  base_args: ["--no-compile", "--batch-size", "8", "--overlap", "0.5", "--blend-mode", "hann",
+              "--num-workers", "2", "--amp-dtype", "fp16"]
+
+# ---------------------------------------------------------------- preregistered
+evaluation:
+  beta: 0.5
+  threshold_u8: 128
+  rescale_check: {lo: 0.25, hi: 0.75}
+  bootstrap: {tile: 128, n: 2000, seed: 0}
+  contamination_registry: configs/checkpoints.yaml
+  # Primary quantities: AUPRC and F0.5@0.5 of every checkpoint on every condition (forward for
+  # paris4/valregions; forward AND reverse for e841). Reported side by side, nothing selected.
+  # Reproduction values of s42_75000 (offset 0) from exp002-004; |delta AUPRC| > 0.01 => flagged.
+  reference_s42_75000:
+    paris4: {auprc: 0.972, f_beta: 0.867}
+    valregions_pooled: {auprc: 0.741, f_beta: 0.682}
+    e841_forward: {auprc: 0.346, f_beta: 0.100}
+    e841_reverse: {auprc: 0.517, f_beta: 0.479}
+  reproduction_tolerance_auprc: 0.01
