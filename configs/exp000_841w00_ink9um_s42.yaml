@@ -1,6 +1,8 @@
 # exp000: first inference of ink_9um on a small crop of PHerc 0841 / w00.
 # Goal: pipeline smoke test + first held-out-scroll observation (841 is not in
 # ink_9um's training set, see configs/checkpoints.yaml). Not a benchmark yet.
+# NOTE (exp001): volume_level 1 is z-truncated, not pooled, so this run fed the model the wrong
+# depth. Its predictions are NOT valid for evaluation; use exp002.
 
 experiment: exp000_841w00_ink9um_s42
 runtime: kaggle-t4x2        # Kaggle offers only "GPU T4 x2"; inference uses 1 GPU. Internet on, PRIVATE
@@ -22,8 +24,7 @@ data:
   base_url: https://huggingface.co/buckets/scrollprize/datasets/resolve/ink/841/w00
   volume: w00.zarr
   # Level 0 is 4.681 um (meta.json: 4.681um_113keV_1.2m_binmean_2_PHerc_0841), 65 slices.
-  # Level 1 has shape (33, 7936, 9472): ~2x in z, y, x => ~9.36 um, close to ink_9um's input.
-  # Hypothesis checked at fetch time (level-1 vs 2x2x2 mean of level 0).
+  # (Wrong assumption, see exp001: level 1 is 2x in y, x only; z keeps the first 33 of 65 planes.)
   volume_level: "1"
   labels:
     ink: w00_inklabels_v2.zarr
