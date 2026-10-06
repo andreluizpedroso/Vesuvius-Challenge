@@ -1,0 +1,51 @@
+# exp006: Phase 1, step 1 - feasibility/speed benchmark of the OFFICIAL ink_9um training recipe on a
+# Kaggle T4 (x2). No model quality is evaluated here. Questions answered:
+#   (1) does the villa trainer run in our Kaggle environment? (2) steps/s, examples/s, data wait and
+#   peak VRAM at several batch sizes, 1 vs 2 GPUs; (3) projected hours for 20k / 78,125 iterations;
+#   (4) does a short real run (validation + checkpoint) work end to end?
+# The recipe is read from the pinned villa checkout (configs/aligned21_hybrid_3d2d.json); only the
+# fields listed under "overrides" are changed (benchmark needs 2 segments instead of 29 representations).
+
+experiment: exp006_train_benchmark
+runtime: kaggle-t4x2          # Internet on, notebook PRIVATE. Both GPUs are used in the 2-GPU runs.
+
+upstream:
+  villa_commit: 0e14cf48c8cee74b11e5e40a9d1d520b74e35423
+  python: "3.14"
+  uv_sync_args: ["--frozen", "--extra", "models", "--no-install-package", "volume-cartographer"]
+  recipe: vesuvius/src/vesuvius/ink_detection/configs/aligned21_hybrid_3d2d.json
+
+data:
+  # Same sources as exp004: ink_9um labels (HF) + public 2.4 um surface volumes (S3, level 2).
+  labels_root: https://huggingface.co/buckets/scrollprize/datasets/resolve/ink_9um/labels/aligned-scrollprizeorg-21slices
+  tree_root: https://huggingface.co/api/buckets/scrollprize/datasets/tree/ink_9um/labels/aligned-scrollprizeorg-21slices
+  volume_level: "2"
+  input: {n_planes: 84, z_pool: 4}        # official pooling recipe: 21 slices of 9.6 um
+  chunk_margin: 1                          # chunks fetched around every non-empty label chunk (patches straddle chunk edges)
+  segments:                                # smallest segments with validation masks (0139, 0814)
+    - {key: pherc0139-w016, volume_url: "https://vesuvius-challenge-open-data.s3.us-east-1.amazonaws.com/PHerc0139/segments/20250108000004-w029_2025010827/surface-volumes/2.399um-0.22m-78keV-volume-20260102150214.zarr"}
+    - {key: pherc0814-46527, volume_url: "https://vesuvius-challenge-open-data.s3.us-east-1.amazonaws.com/PHerc0814/segments/20260226000000-46527_2um_try2/surface-volumes/2.399um-0.22m-78keV-volume-20260309142202.zarr"}
+
+# Everything not listed here stays as in the official recipe (model, loss, SGD lr 0.01, fp16, patch
+# 17x128x128, augmentation preset, depth jitter, robust-MAD normalization, seed 42).
+overrides:
+  sampling_strategy: uniform               # the fixed 4-scroll prior needs all 4 scrolls
+  dataloader_workers: 4                    # Kaggle has 4 CPU cores (official: 12)
+  warmup_steps: 30
+benchmark_runs:                            # speed runs: validation/checkpoints effectively off
+  num_iterations: 150
+  warmup_steps: 30                         # excluded from the timing
+  runs:
+    - {id: b16_1gpu, batch_size: 16, gpus: 1}
+    - {id: b32_1gpu, batch_size: 32, gpus: 1}
+    - {id: b64_1gpu, batch_size: 64, gpus: 1}     # official batch; may run out of memory on a 16 GB T4
+    - {id: b32_2gpu, batch_size: 32, gpus: 2}     # per process; effective batch 64 = official
+functional_run:                            # short real run: loss, validation path, checkpoint
+  id: func_b16_1gpu
+  batch_size: 16
+  gpus: 1
+  num_iterations: 300
+  val_every: 100
+  val_steps: 4
+  save_every: 300
+timeout_seconds: 1500                      # per run
