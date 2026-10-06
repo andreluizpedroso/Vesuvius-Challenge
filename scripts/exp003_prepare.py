@@ -49,6 +49,8 @@ def list_nonempty(tree_url: str, name: str) -> set[tuple[int, int]]:
         if e["type"] == "file" and re.fullmatch(r"\d+\.\d+\.\d+", key):
             _, iy, ix = (int(t) for t in key.split("."))
             chunks[(iy, ix)] = e["size"]
+    if not chunks:
+        raise RuntimeError(f"no chunk entries listed at {tree_url}/{name}/0 (wrong path?)")
     empty = collections.Counter(chunks.values()).most_common(1)[0][0]
     return {k for k, v in chunks.items() if v > empty}
 

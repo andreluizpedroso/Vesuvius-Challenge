@@ -46,7 +46,7 @@ def copy_label_zarr(base: str, tree: str, key: str, kind: str, dest: Path) -> se
     meta = json.loads((root / "0/.zarray").read_text())
     sep = meta.get("dimension_separator", ".")
     assert sep == ".", f"unexpected dimension_separator {sep!r} in {name}"
-    nonempty = list_nonempty(tree, name)
+    nonempty = list_nonempty(f"{tree}/{key}", name)
 
     def one(j):
         iy, ix = j
@@ -85,7 +85,7 @@ def prepare_segment(seg: dict, d: dict, out: Path) -> dict:
     path = dest / key / "surface-volume.zarr"
     arr = zarr.create_array(store=str(path), shape=(d["input"]["n_planes"] // d["input"]["z_pool"], H, W),
                             chunks=(d["input"]["n_planes"] // d["input"]["z_pool"], CH, CH),
-                            dtype="uint8", fill_value=0, zarr_format=2)
+                            dtype="uint8", fill_value=0, zarr_format=2, overwrite=True)
 
     def one(j):
         iy, ix = j
@@ -110,9 +110,9 @@ def main() -> int:
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
     cfg = yaml.safe_load(args.config.read_text())
-    if args.out.exists() and any(args.out.iterdir()):
-        raise FileExistsError(f"Refusing to overwrite non-empty {args.out}")
-    args.out.mkdir(parents=True, exist_ok=True)
+    if (args.out / "train_data.json").exists():
+        raise FileExistsError(f"{args.out} already holds a completed run (train_data.json)")
+    args.out.mkdir(parents=True, exist_ok=True)   # a partial earlier run is simply redone (files are overwritten)
     rec = {"experiment": cfg["experiment"], "segments": []}
     for seg in cfg["data"]["segments"]:
         rec["segments"].append(prepare_segment(seg, cfg["data"], args.out))
