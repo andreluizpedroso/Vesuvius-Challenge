@@ -16,6 +16,8 @@ import collections
 import json
 import re
 import sys
+import time
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -38,9 +40,16 @@ def list_nonempty(tree_url: str, name: str) -> set[tuple[int, int]]:
     """
     url, entries = f"{tree_url}/{name}/0?recursive=true", []
     while url:
-        with urllib.request.urlopen(url, timeout=60) as r:
-            entries += json.load(r)
-            link = r.headers.get("Link", "")
+        for attempt in range(10):                        # the listing API is rate limited too (HTTP 429)
+            try:
+                with urllib.request.urlopen(url, timeout=60) as r:
+                    entries += json.load(r)
+                    link = r.headers.get("Link", "")
+                break
+            except urllib.error.HTTPError as e:
+                if attempt == 9 or (e.code != 429 and e.code < 500):
+                    raise
+                time.sleep(min(2 ** attempt, 60))
         m = re.search(r'<([^>]+)>;\s*rel="next"', link)
         url = m.group(1) if m else None
     chunks = {}

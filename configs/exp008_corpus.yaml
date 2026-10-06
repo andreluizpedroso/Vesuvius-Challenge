@@ -16,6 +16,8 @@ data:
   volume_level: "2"
   input: {n_planes: 84, z_pool: 4}
   chunk_margin: 1
+  hf_min_interval_s: 0.2        # <= 5 requests/s to huggingface.co per notebook (HTTP 429 otherwise)
+  retry_rounds: 3
 
 pip: ["zarr==3.2.1", "numcodecs==0.16.5", "pyyaml"]
 

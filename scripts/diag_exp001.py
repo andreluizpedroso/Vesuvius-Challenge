@@ -16,8 +16,10 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -35,9 +37,30 @@ CHUNK = 128
 _fetch_stats = {"requests": 0, "bytes": 0, "missing": 0}
 
 
+# Optional per-host minimum interval (seconds) between requests, shared by all threads. Empty by default
+# (earlier experiments are unaffected); the corpus builder sets it for huggingface.co to stay under its rate limit.
+MIN_INTERVAL: dict[str, float] = {}
+_throttle_lock = threading.Lock()
+_next_slot: dict[str, float] = {}
+
+
+def _throttle(url: str) -> None:
+    host = urllib.parse.urlparse(url).netloc
+    interval = MIN_INTERVAL.get(host, 0.0)
+    if not interval:
+        return
+    with _throttle_lock:
+        now = time.monotonic()
+        slot = max(now, _next_slot.get(host, 0.0))
+        _next_slot[host] = slot + interval
+    if slot > now:
+        time.sleep(slot - now)
+
+
 def fetch(url: str, allow_missing: bool = False) -> bytes | None:
     """GET with retries; 429/5xx are retried with backoff (honoring Retry-After)."""
-    for attempt in range(7):
+    for attempt in range(10):
+        _throttle(url)
         try:
             with urllib.request.urlopen(url, timeout=60) as r:
                 data = r.read()
@@ -48,15 +71,15 @@ def fetch(url: str, allow_missing: bool = False) -> bytes | None:
             if e.code == 404 and allow_missing:
                 _fetch_stats["missing"] += 1
                 return None
-            if attempt == 6 or (e.code != 429 and e.code < 500):
+            if attempt == 9 or (e.code != 429 and e.code < 500):
                 raise
             retry_after = e.headers.get("Retry-After") if e.headers else None
-            time.sleep(float(retry_after) if retry_after and retry_after.isdigit() else min(2 ** attempt, 30))
+            time.sleep(float(retry_after) if retry_after and retry_after.isdigit() else min(2 ** attempt, 60))
             _fetch_stats["retries"] = _fetch_stats.get("retries", 0) + 1
         except Exception:
-            if attempt == 6:
+            if attempt == 9:
                 raise
-            time.sleep(min(2 ** attempt, 30))
+            time.sleep(min(2 ** attempt, 60))
     return None
 
 

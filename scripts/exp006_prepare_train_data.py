@@ -35,8 +35,14 @@ KINDS = ("inklabels", "supervision_mask", "validation_mask")
 
 
 def copy_label_zarr(base: str, tree: str, key: str, kind: str, dest: Path) -> set[tuple[int, int]]:
-    """Copy .zgroup/.zattrs/0/.zarray (+optional 0/.zattrs) and every non-empty chunk, byte for byte."""
+    """Copy .zgroup/.zattrs/0/.zarray (+optional 0/.zattrs) and every non-empty chunk, byte for byte.
+
+    The validation mask exists for only 3 of the 24 segments: when its .zgroup is absent (404) the kind is
+    skipped and an empty set is returned. Files already present locally are not fetched again.
+    """
     name = f"{key}_{kind}.zarr"
+    if kind == "validation_mask" and dz.fetch(f"{base}/{key}/{name}/.zgroup", allow_missing=True) is None:
+        return set()
     root = dest / key / name
     (root / "0").mkdir(parents=True, exist_ok=True)
     for rel, optional in ((".zgroup", False), (".zattrs", False), ("0/.zarray", False), ("0/.zattrs", True)):
@@ -50,10 +56,12 @@ def copy_label_zarr(base: str, tree: str, key: str, kind: str, dest: Path) -> se
 
     def one(j):
         iy, ix = j
-        raw = dz.fetch(f"{base}/{key}/{name}/0/0.{iy}.{ix}")
-        (root / "0" / f"0.{iy}.{ix}").write_bytes(raw)
+        target = root / "0" / f"0.{iy}.{ix}"
+        if target.exists() and target.stat().st_size > 0:
+            return
+        target.write_bytes(dz.fetch(f"{base}/{key}/{name}/0/0.{iy}.{ix}"))
 
-    with ThreadPoolExecutor(8) as pool:
+    with ThreadPoolExecutor(4) as pool:
         list(pool.map(one, sorted(nonempty)))
     return nonempty
 

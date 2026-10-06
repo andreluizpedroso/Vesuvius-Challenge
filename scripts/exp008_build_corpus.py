@@ -32,23 +32,33 @@ def main() -> int:
     scrolls = set(cfg["groups"][args.group])
     segs = [s for s in cfg["segments"] if s["key"].split("-")[0] in scrolls]
     args.out.mkdir(parents=True, exist_ok=True)
+    dz.MIN_INTERVAL["huggingface.co"] = cfg["data"].get("hf_min_interval_s", 0.2)   # stay under the HF rate limit (HTTP 429)
     rec = {"experiment": cfg["experiment"], "group": args.group, "segments": [], "failed": []}
     t_all = time.time()
-    for i, seg in enumerate(segs, 1):
-        t0 = time.time()
-        print(f"[{i}/{len(segs)}] {seg['key']} ...", flush=True)
-        try:
-            r = prepare_segment(seg, cfg["data"], args.out)
-            r["seconds"] = round(time.time() - t0, 1)
-            rec["segments"].append(r)
-            print(f"    done in {r['seconds']} s; volume chunks fetched {r['volume_chunks_fetched']} "
-                  f"(nonzero {r['volume_chunks_nonzero']}); fetched so far {dz._fetch_stats['bytes'] / 1e9:.2f} GB", flush=True)
-        except Exception:  # noqa: BLE001 - keep going; the failure is recorded
-            rec["failed"].append({"key": seg["key"], "error": traceback.format_exc()[-1200:]})
-            print(f"    FAILED {seg['key']}:\n{rec['failed'][-1]['error']}", flush=True)
-        rec["fetch_stats"] = dict(dz._fetch_stats)
-        rec["elapsed_s"] = round(time.time() - t_all, 1)
-        (args.out / "corpus.json").write_text(json.dumps(rec, indent=1))
+    pending, rounds = list(segs), cfg["data"].get("retry_rounds", 3)
+    for rnd in range(rounds):
+        failed_now = []
+        for i, seg in enumerate(pending, 1):
+            t0 = time.time()
+            print(f"[round {rnd + 1}] [{i}/{len(pending)}] {seg['key']} ...", flush=True)
+            try:
+                r = prepare_segment(seg, cfg["data"], args.out)       # idempotent: existing label files are kept
+                r["seconds"] = round(time.time() - t0, 1)
+                rec["segments"].append(r)
+                print(f"    done in {r['seconds']} s; volume chunks fetched {r['volume_chunks_fetched']} "
+                      f"(nonzero {r['volume_chunks_nonzero']}); fetched so far {dz._fetch_stats['bytes'] / 1e9:.2f} GB", flush=True)
+            except Exception:  # noqa: BLE001 - keep going; the failure is recorded and retried in the next round
+                failed_now.append({"key": seg["key"], "error": traceback.format_exc()[-1200:]})
+                print(f"    FAILED {seg['key']}:\n{failed_now[-1]['error']}", flush=True)
+            rec["fetch_stats"] = dict(dz._fetch_stats)
+            rec["elapsed_s"] = round(time.time() - t_all, 1)
+            rec["failed"] = failed_now
+            (args.out / "corpus.json").write_text(json.dumps(rec, indent=1))
+        if not failed_now:
+            break
+        pending = [s for s in pending if s["key"] in {f["key"] for f in failed_now}]
+        print(f"round {rnd + 1}: {len(failed_now)} segment(s) failed, cooling down 90 s before retrying", flush=True)
+        time.sleep(90)
     print(f"group {args.group}: {len(rec['segments'])} ok, {len(rec['failed'])} failed, {rec['elapsed_s']} s, "
           f"{dz._fetch_stats['bytes'] / 1e9:.2f} GB fetched", flush=True)
     return 0
