@@ -24,7 +24,14 @@ ink_9um:
       PHercParis4: [w00, w01, w02, w03, w05, w06, w07, w09]
     native_9p362um:         # labels/native9-scrollprizeorg-21slices/
       PHerc0139: [w035, w039, w040, w041, w044]
-  # Not stated anywhere we could find: a held-out evaluation set for these weights.
+  # Validation masks (villa trainer zeroes supervision there, dataset.py exclude_validation_voxels):
+  # regions of TRAINING segments withheld from the loss. Same scroll, adjacent to supervised
+  # training areas => 'in-scroll held-out region', not cross-scroll. (ink_9um dataset README)
+  held_out_regions:
+    PHerc0139: [w016]
+    PHerc0814: ["46527"]
+    PHerc1667: [w029]
+  # No separate held-out *scroll* evaluation set is declared for these weights.
   held_out_eval_declared: false
   caveats:
     - "Segment ids in ink-labels (e.g. phercparis4/w00_20231016151002) are assumed to be the

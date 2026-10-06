@@ -77,10 +77,13 @@ def tile_bootstrap(pred, gt, mask, t, beta, tile, n, seed):
     return [float(np.percentile(vals, 2.5)), float(np.percentile(vals, 97.5))]
 
 
-def contamination(registry_path: Path, key: str, scroll: str, segment: str) -> str:
+def contamination(registry_path: Path, key: str, scroll: str, segment: str, region: str | None = None) -> str:
     reg = yaml.safe_load(registry_path.read_text())[key]
     if scroll not in reg["train_scrolls"]:
         return "cross-scroll (scroll not in training data)"
+    if region == "held_out_validation" and segment in reg.get("held_out_regions", {}).get(scroll, []):
+        return ("SAME-SCROLL held-out region (validation mask; adjacent to training areas; "
+                "optimistic vs a new scroll)")
     segs = reg["train_segments"]
     listed = any(segment in v for grp in segs.values() for s, v in grp.items() if s == scroll)
     return ("IN-TRAIN segment (not a generalization measure)" if listed

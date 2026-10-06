@@ -1,0 +1,58 @@
+# exp004: ink_9um on the VALIDATION regions of three training segments (same scroll, region withheld
+# from the loss by the official trainer). Fills the middle row of the model x scroll table:
+#   in-train (exp003)  >  held-out region of a seen scroll (exp004)  >  unseen scroll (exp002).
+# This is an UPPER BOUND for "new region": validation regions touch supervised training areas
+# (strokes continue across the boundary; neighbouring patches share image context), and the
+# authors used these same cases for checkpoint selection (val_balanced_accuracy).
+# Everything under "preregistered" was fixed BEFORE seeing any prediction.
+
+experiment: exp004_valregions_ink9um_s42
+runtime: kaggle-t4x2          # 1 GPU used. Internet on, notebook PRIVATE.
+
+upstream:
+  villa_commit: 0e14cf48c8cee74b11e5e40a9d1d520b74e35423
+  python: "3.14"
+  uv_sync_args: ["--frozen", "--extra", "models", "--no-install-package", "volume-cartographer"]
+
+checkpoint:
+  registry_key: ink_9um
+  hf_repo: scrollprize/ink_9um
+  hf_revision: 7109667e2607db1b90c37c8b09cb876ea7fe7bb1
+  file: hybrid_3d2d-seed42/step-075000.pth      # 138 MB, fixed in advance (same as exp000-003)
+
+data:
+  # Same recipe as exp003 / the training data: public 2.4 um surface volume, level 2 (9.6 um xy),
+  # 84 centered planes (13..96), mean of 4 -> 21 slices; labels annotated at channel 10.
+  input: {n_planes: 84, z_pool: 4, xy_pool: 1}
+  volume_level: "2"
+  labels_root: https://huggingface.co/buckets/scrollprize/datasets/resolve/ink_9um/labels/aligned-scrollprizeorg-21slices
+  tree_root: https://huggingface.co/api/buckets/scrollprize/datasets/tree/ink_9um/labels/aligned-scrollprizeorg-21slices
+  channel: 10
+  # Crop = bounding box (chunk aligned, no margin) of the non-empty chunks of the validation mask.
+  # Evaluation mask = validation mask > 0 (what the official validation uses as supervision).
+  segments:
+    - {key: pherc0139-w016, scroll: PHerc0139, segment: w016,
+       volume_url: "https://vesuvius-challenge-open-data.s3.us-east-1.amazonaws.com/PHerc0139/segments/20250108000004-w029_2025010827/surface-volumes/2.399um-0.22m-78keV-volume-20260102150214.zarr"}
+    - {key: pherc0814-46527, scroll: PHerc0814, segment: "46527",
+       volume_url: "https://vesuvius-challenge-open-data.s3.us-east-1.amazonaws.com/PHerc0814/segments/20260226000000-46527_2um_try2/surface-volumes/2.399um-0.22m-78keV-volume-20260309142202.zarr"}
+    - {key: pherc1667-w029, scroll: PHerc1667, segment: w029,
+       volume_url: "https://vesuvius-challenge-open-data.s3.us-east-1.amazonaws.com/PHerc1667/segments/20251212185248-w029_20251212185248662_flatboi/surface-volumes/2.399um-0.22m-78keV-volume-20251217075048.zarr"}
+
+inference:
+  module: vesuvius.ink_detection.inference.infer
+  # Forward only (exp003: forward is the training orientation). fp16 forced on T4.
+  base_args: ["--no-compile", "--batch-size", "8", "--overlap", "0.5", "--blend-mode", "hann",
+              "--num-workers", "2", "--amp-dtype", "fp16", "--direction", "forward"]
+  depth_offsets: [-2, 0, 2]     # layers [2+k, 19+k) of the 21 slices (= the training jitter range)
+
+# ---------------------------------------------------------------- preregistered
+evaluation:
+  primary: {offset: 0, direction: forward}      # reported per segment AND pooled over the 3 segments
+  region: held_out_validation
+  beta: 0.5
+  threshold_u8: 128
+  rescale_check: {lo: 0.25, hi: 0.75}
+  oracle_threshold: reported_as_optimistic
+  bootstrap: {tile: 128, n: 2000, seed: 0}      # tiles resampled within each segment / pooled over all tiles
+  baseline: all_positive
+  contamination_registry: configs/checkpoints.yaml
