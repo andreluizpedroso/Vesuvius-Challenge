@@ -1,0 +1,33 @@
+# Contamination registry: which scrolls/segments each checkpoint was trained on.
+# A result only counts as "cross-scroll" if the evaluated scroll is absent from
+# `train_scrolls` below. Same scroll, different segment => "in-scroll", not cross-scroll.
+
+ink_9um:
+  hf_repo: scrollprize/ink_9um
+  hf_revision: 7109667e2607db1b90c37c8b09cb876ea7fe7bb1   # model repo sha, 2026-08-14
+  license: MIT
+  checkpoints:
+    - hybrid_3d2d-seed42/step-{010000,020000,030000,040000,050000,060000,075000}.pth
+    - hybrid_3d2d-seed43/step-{010000,020000,030000,040000,050000,060000,075000}.pth
+  expected_input: "~9 um isotropic surface volume, 21 slices (17-of-21 jittered window in training)"
+  # Source of truth for the lists below (both seeds share the same data):
+  provenance:
+    repo: ScrollPrize/villa
+    commit: 0e14cf48c8cee74b11e5e40a9d1d520b74e35423
+    file: vesuvius/src/vesuvius/ink_detection/configs/aligned21_hybrid_3d2d.json
+  train_scrolls: [PHerc0139, PHerc1667, PHercParis4, PHerc0814]
+  train_segments:
+    aligned_2p4um_pooled:   # labels/aligned-scrollprizeorg-21slices/
+      PHerc0139: [w016, w017, w028, w029, w035, w039, w040, w041, w043]
+      PHerc0814: ["46527"]
+      PHerc1667: [w013, w018, w023, w028, w029, w031]
+      PHercParis4: [w00, w01, w02, w03, w05, w06, w07, w09]
+    native_9p362um:         # labels/native9-scrollprizeorg-21slices/
+      PHerc0139: [w035, w039, w040, w041, w044]
+  # Not stated anywhere we could find: a held-out evaluation set for these weights.
+  held_out_eval_declared: false
+  caveats:
+    - "Segment ids in ink-labels (e.g. phercparis4/w00_20231016151002) are assumed to be the
+       same physical segments as phercparis4-w00 in the training config (prefix match only)."
+    - "Labels of non-training scrolls (e.g. 841) may come from model-assisted pseudo-labeling;
+       if those models saw ink_9um's training scrolls, label independence is not guaranteed."

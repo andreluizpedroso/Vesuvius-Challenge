@@ -1,0 +1,32 @@
+# Data, predictions, weights: never committed (licensing + size)
+data/
+outputs/
+checkpoints/
+external/
+villa/
+*.zarr/
+*.zarr
+*.tif
+*.tiff
+*.png
+*.jpg
+*.npy
+*.npz
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+
+# Python / tooling
+.venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
