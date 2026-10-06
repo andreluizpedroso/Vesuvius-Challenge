@@ -54,8 +54,8 @@ def fetch(url: str, allow_missing: bool = False) -> bytes | None:
     return None
 
 
-def fetch_json(rel: str) -> dict:
-    return json.loads(fetch(f"{BASE}/{rel}"))
+def fetch_json(rel: str, base: str | None = None) -> dict:
+    return json.loads(fetch(f"{base or BASE}/{rel}"))
 
 
 def decode_chunk(raw: bytes, compressor: dict | None) -> bytes:
@@ -70,9 +70,10 @@ def decode_chunk(raw: bytes, compressor: dict | None) -> bytes:
 class ZArray:
     """Minimal zarr-v2 reader (uncompressed or blosc), enough for chunk-aligned windows."""
 
-    def __init__(self, name: str, level: str):
-        self.path = f"{name}/{level}"
-        self.meta = fetch_json(f"{self.path}/.zarray")
+    def __init__(self, name: str, level: str, base: str | None = None):
+        self.base = base or BASE          # default: module-level BASE (exp001 behaviour)
+        self.path = f"{name}/{level}" if name else str(level)
+        self.meta = fetch_json(f"{self.path}/.zarray", self.base)
         self.shape = tuple(self.meta["shape"])
         self.chunks = tuple(self.meta["chunks"])
         self.sep = self.meta.get("dimension_separator", ".")
@@ -81,7 +82,7 @@ class ZArray:
 
     def _chunk(self, iz: int, iy: int, ix: int) -> np.ndarray:
         key = self.sep.join(str(i) for i in (iz, iy, ix))
-        raw = fetch(f"{BASE}/{self.path}/{key}", allow_missing=True)
+        raw = fetch(f"{self.base}/{self.path}/{key}", allow_missing=True)
         if raw is None:
             return np.zeros(self.chunks, self.dtype)
         buf = decode_chunk(raw, self.comp)
