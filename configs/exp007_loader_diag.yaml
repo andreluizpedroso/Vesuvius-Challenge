@@ -13,7 +13,7 @@ base_config: configs/exp006_train_benchmark.yaml    # upstream pins, data source
 
 loader_profile:
   profile_samples: 48           # dataset[i] calls under cProfile (single process)
-  worker_sweep: [0, 2, 4, 6, 8]
+  worker_sweep: [4]             # first run's log already gave 0/2/4/6/8 (25/42/58/54/56 ex/s, CPU saturated at >=4); only the profile + aug-off bound are needed
   sweep_batch_size: 32
   sweep_warmup_batches: 4
   sweep_timed_batches: 16       # (workers=0 uses 6 timed batches)
@@ -34,8 +34,6 @@ benchmark_runs:
     - {id: unc_w4,       volume: uncompressed, batch_size: 32, gpus: 1, workers: 4}
     # threads1: OMP/MKL/OPENBLAS_NUM_THREADS=1 (tests intra-op thread oversubscription: workers x threads > 4 CPUs)
     - {id: thr1_w4,      volume: compressed,   batch_size: 32, gpus: 1, workers: 4, env: threads1}
-    - {id: thr1_w8,      volume: compressed,   batch_size: 32, gpus: 1, workers: 8, env: threads1}
     - {id: gpu2_w2,      volume: compressed,   batch_size: 32, gpus: 2, workers: 2}    # 2 GPUs, 2 workers each (4 total = CPUs)
-    - {id: gpu2_thr1_w2, volume: compressed,   batch_size: 32, gpus: 2, workers: 2, env: threads1}
 cpu_monitor_interval_s: 2
 timeout_seconds: 1500            # per run
