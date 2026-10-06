@@ -3,7 +3,7 @@
 # ink_9um's training set, see configs/checkpoints.yaml). Not a benchmark yet.
 
 experiment: exp000_841w00_ink9um_s42
-runtime: kaggle-t4          # 1x T4 16 GB, Internet on, notebook kept PRIVATE
+runtime: kaggle-t4x2        # Kaggle offers only "GPU T4 x2"; inference uses 1 GPU. Internet on, PRIVATE
 
 upstream:
   villa_commit: 0e14cf48c8cee74b11e5e40a9d1d520b74e35423
@@ -41,7 +41,7 @@ data:
     select_level: "4"
     select_stride: 16       # in select_level pixels
     min_coverage: 0.9
-    bbox_yx: null           # filled by fetch_crop.py output (crop.json); copy here after run
+    bbox_yx: [5504, 5248, 6528, 6272]   # y0, x0, y1, x1 at volume_level; selected on run 2026-10-06
 
 inference:
   module: vesuvius.ink_detection.inference.infer
